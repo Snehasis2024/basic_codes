@@ -7,9 +7,9 @@ from pathlib import Path
 from datetime import datetime
 from collections import defaultdict
 
-# ==========================================
+# =====================================================
 # CONFIGURATION
-# ==========================================
+# =====================================================
 
 DOWNLOADS = Path.home() / "Downloads"
 REPORT = DOWNLOADS / "Downloads_Storage_Report.html"
@@ -17,19 +17,20 @@ REPORT = DOWNLOADS / "Downloads_Storage_Report.html"
 TOP_FOLDERS = 20
 TOP_FILES = 100
 
-print("\n========================================")
-print("      WINDOWS DOWNLOADS ANALYZER")
-print("========================================")
-print(f"\nScanning: {DOWNLOADS}")
-print("\nPlease wait. Scanning all files and folders...\n")
+print("\n" + "=" * 60)
+print("          WINDOWS DOWNLOADS STORAGE ANALYZER")
+print("=" * 60)
+
+print(f"\nScanning folder: {DOWNLOADS}")
+print("Please wait. This may take some time...\n")
 
 if not DOWNLOADS.exists():
     print("ERROR: Downloads folder not found!")
     sys.exit(1)
 
-# ==========================================
+# =====================================================
 # SCAN FILES AND FOLDERS
-# ==========================================
+# =====================================================
 
 folder_stats = defaultdict(lambda: {"size": 0, "count": 0})
 extension_stats = defaultdict(lambda: {"size": 0, "count": 0})
@@ -50,6 +51,7 @@ for root, dirs, files in os.walk(
     onerror=scan_error,
     followlinks=False
 ):
+    # Avoid symbolic links
     dirs[:] = [
         d for d in dirs
         if not os.path.islink(os.path.join(root, d))
@@ -77,25 +79,28 @@ for root, dirs, files in os.walk(
                 "size": size
             })
 
-            # Extension statistics
+            # File extension statistics
             ext = file_path.suffix.lower() or "No extension"
+
             extension_stats[ext]["size"] += size
             extension_stats[ext]["count"] += 1
 
-            # Add size to current folder and all parent folders
+            # Calculate inclusive folder sizes
             parent = root_path
 
             while parent != DOWNLOADS and DOWNLOADS in parent.parents:
+
                 folder_stats[parent]["size"] += size
                 folder_stats[parent]["count"] += 1
+
                 parent = parent.parent
 
         except (PermissionError, OSError):
             errors += 1
 
-# ==========================================
+# =====================================================
 # PROCESS RESULTS
-# ==========================================
+# =====================================================
 
 largest_folders = sorted(
     [
@@ -130,9 +135,9 @@ largest_extensions = sorted(
     reverse=True
 )
 
-# ==========================================
+# =====================================================
 # HELPER FUNCTIONS
-# ==========================================
+# =====================================================
 
 def mb(size):
     return size / (1024 ** 2)
@@ -143,13 +148,21 @@ def gb(size):
 def fmt_size(size):
     if size >= 1024 ** 3:
         return f"{gb(size):.3f} GB"
-    return f"{mb(size):,.2f} MB"
+    if size >= 1024 ** 2:
+        return f"{mb(size):,.2f} MB"
+    if size >= 1024:
+        return f"{size / 1024:,.2f} KB"
+    return f"{size} Bytes"
 
 def safe(value):
     return html.escape(str(value))
 
 def make_table(headers, rows):
-    output = "<div class='table-container'><table><thead><tr>"
+    output = """
+    <div class="table-container">
+    <table>
+    <thead><tr>
+    """
 
     for header in headers:
         output += f"<th>{safe(header)}</th>"
@@ -158,16 +171,19 @@ def make_table(headers, rows):
 
     for row in rows:
         output += "<tr>"
+
         for item in row:
             output += f"<td>{safe(item)}</td>"
+
         output += "</tr>"
 
     output += "</tbody></table></div>"
+
     return output
 
-# ==========================================
-# CREATE FOLDER TABLE
-# ==========================================
+# =====================================================
+# FOLDER TABLE
+# =====================================================
 
 folder_rows = []
 
@@ -182,12 +198,12 @@ for item in largest_folders:
 
 folder_html = make_table(
     ["Folder", "Size", "Size (MB)", "Files", "Full Path"],
-    folder_rows
+    folder_rows[:TOP_FOLDERS]
 )
 
-# ==========================================
-# CREATE FILE TABLE
-# ==========================================
+# =====================================================
+# FILE TABLE
+# =====================================================
 
 file_rows = []
 
@@ -204,9 +220,9 @@ file_html = make_table(
     file_rows
 )
 
-# ==========================================
-# CREATE EXTENSION TABLE
-# ==========================================
+# =====================================================
+# EXTENSION TABLE
+# =====================================================
 
 extension_rows = []
 
@@ -223,21 +239,23 @@ extension_html = make_table(
     extension_rows
 )
 
-# ==========================================
+# =====================================================
 # SUMMARY
-# ==========================================
+# =====================================================
 
 largest_file_size = (
     largest_files[0]["size"] if largest_files else 0
 )
 
-# ==========================================
-# HTML DESIGN
-# ==========================================
+# =====================================================
+# HTML CSS
+# =====================================================
 
 style = """
 <style>
-* { box-sizing: border-box; }
+* {
+    box-sizing: border-box;
+}
 
 body {
     font-family: 'Segoe UI', Arial, sans-serif;
@@ -307,7 +325,6 @@ th {
     color: white;
     position: sticky;
     top: 0;
-    cursor: pointer;
 }
 
 td, th {
@@ -344,26 +361,35 @@ input {
 }
 
 @media(max-width: 600px) {
-    body { padding: 12px; }
+    body {
+        padding: 12px;
+    }
 }
 </style>
 """
 
-# ==========================================
-# GENERATE SEARCHABLE HTML
-# ==========================================
+# =====================================================
+# GENERATE HTML REPORT
+# =====================================================
 
 html_report = f"""
 <!DOCTYPE html>
-<html>
+<html lang="en">
+
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<meta name="viewport"
+content="width=device-width, initial-scale=1">
+
 <title>Downloads Storage Analysis</title>
+
 {style}
+
 </head>
 
 <body>
+
 <div class="container">
 
 <h1>Windows Downloads - Storage Analysis</h1>
@@ -372,7 +398,9 @@ html_report = f"""
 Generated: {datetime.now().strftime("%d %B %Y, %I:%M:%S %p")}
 </p>
 
-<p><b>Scanned Location:</b> {safe(DOWNLOADS)}</p>
+<p>
+<b>Scanned Location:</b> {safe(DOWNLOADS)}
+</p>
 
 <div class="summary">
 
@@ -404,68 +432,96 @@ Scan Errors
 </div>
 
 <h2>Top 20 Largest Folders</h2>
-<input type="text" onkeyup="filterTable(this, 'folders')"
-placeholder="Search folders...">
+
+<input
+type="text"
+onkeyup="filterTable(this, 'folders')"
+placeholder="Search folders..."
+>
+
 <div id="folders">
-{make_table(
-    ["Folder", "Size", "Size (MB)", "Files", "Full Path"],
-    folder_rows[:TOP_FOLDERS]
-)}
+{folder_html}
 </div>
 
 <h2>Top 100 Largest Individual Files</h2>
-<input type="text" onkeyup="filterTable(this, 'files')"
-placeholder="Search files...">
+
+<input
+type="text"
+onkeyup="filterTable(this, 'files')"
+placeholder="Search files..."
+>
+
 <div id="files">
 {file_html}
 </div>
 
 <h2>Storage by File Extension</h2>
-<input type="text" onkeyup="filterTable(this, 'extensions')"
-placeholder="Search extensions...">
+
+<input
+type="text"
+onkeyup="filterTable(this, 'extensions')"
+placeholder="Search extensions..."
+>
+
 <div id="extensions">
 {extension_html}
 </div>
 
 <div class="footer">
+
 <p><b>Analysis completed successfully.</b></p>
+
 <p>
 Folder sizes include all nested files and subfolders.
-This is a read-only analysis. No files were deleted or modified.
+This is a read-only analysis.
+No files were deleted or modified.
 </p>
+
 <p>Report generated by Python Downloads Analyzer.</p>
+
 </div>
 
 </div>
 
 <script>
-function filterTable(input, containerId) {
+
+function filterTable(input, containerId) {{
+
     const query = input.value.toLowerCase();
+
     const rows = document.querySelectorAll(
         '#' + containerId + ' table tbody tr'
     );
 
-    rows.forEach(row => {
+    rows.forEach(row => {{
+
         row.style.display =
             row.innerText.toLowerCase().includes(query) ? '' : 'none';
-    });
-}
+
+    }});
+
+}}
+
 </script>
 
 </body>
 </html>
 """
 
-# ==========================================
-# SAVE AND OPEN REPORT
-# ==========================================
+# =====================================================
+# SAVE REPORT
+# =====================================================
 
 try:
-    REPORT.write_text(html_report, encoding="utf-8")
 
-    print("\n========================================")
-    print("       SCAN COMPLETED SUCCESSFULLY")
-    print("========================================")
+    REPORT.write_text(
+        html_report,
+        encoding="utf-8"
+    )
+
+    print("\n" + "=" * 60)
+    print("          SCAN COMPLETED SUCCESSFULLY")
+    print("=" * 60)
 
     print(f"\nTotal files       : {len(all_files):,}")
     print(f"Total folders     : {len(all_folders):,}")
@@ -473,16 +529,25 @@ try:
     print(f"Scan errors       : {errors}")
 
     print("\nTOP 10 LARGEST FOLDERS")
+    print("-" * 60)
 
     for item in largest_folders[:10]:
-        print(f"{fmt_size(item['size']):>12}  {item['path']}")
 
-    print("\nHTML REPORT:")
+        print(
+            f"{fmt_size(item['size']):>12}  "
+            f"{item['path']}"
+        )
+
+    print("\nHTML REPORT GENERATED:")
     print(REPORT)
 
     print("\nOpening report in browser...")
 
-    webbrowser.open(REPORT.resolve().as_uri())
+    webbrowser.open(
+        REPORT.resolve().as_uri()
+    )
 
 except OSError as error:
+
     print(f"\nCould not generate report: {error}")
+
