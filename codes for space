@@ -1,0 +1,206 @@
+
+$Downloads = "$env:USERPROFILE\Downloads"
+$Report = "$Downloads\Downloads_Storage_Report.html"
+
+Write-Host "Starting deep Downloads analysis..." -ForegroundColor Cyan
+
+$Folders = Get-ChildItem -LiteralPath $Downloads -Directory -Recurse -Force -ErrorAction SilentlyContinue
+
+$Files = Get-ChildItem -LiteralPath $Downloads -File -Recurse -Force -ErrorAction SilentlyContinue
+
+$FolderStats = @{}
+
+foreach ($Folder in $Folders) {
+    $FolderStats[$Folder.FullName] = @{
+        Size = [long]0
+        Count = 0
+    }
+}
+
+$TotalSize = [long]0
+
+foreach ($File in $Files) {
+    $TotalSize += $File.Length
+    $Parent = $File.DirectoryName
+
+    while ($Parent -and $Parent.StartsWith($Downloads, [StringComparison]::OrdinalIgnoreCase) -and $Parent -ne $Downloads) {
+
+        if (-not $FolderStats.ContainsKey($Parent)) {
+            $FolderStats[$Parent] = @{
+                Size = [long]0
+                Count = 0
+            }
+        }
+
+        $FolderStats[$Parent].Size += $File.Length
+        $FolderStats[$Parent].Count++
+
+        $Parent = Split-Path $Parent -Parent
+    }
+}
+
+$FolderResults = foreach ($Path in $FolderStats.Keys) {
+    [PSCustomObject]@{
+        Folder = Split-Path $Path -Leaf
+        SizeGB = [math]::Round($FolderStats[$Path].Size / 1GB, 3)
+        SizeMB = [math]::Round($FolderStats[$Path].Size / 1MB, 2)
+        Files = $FolderStats[$Path].Count
+        FullPath = $Path
+    }
+}
+
+$LargestFolders = $FolderResults | Sort-Object SizeGB -Descending
+
+$LargestFiles = $Files |
+    Sort-Object Length -Descending |
+    Select-Object -First 100 |
+    Select-Object @{
+        Name="SizeGB"; Expression={[math]::Round($_.Length / 1GB, 3)}
+    }, @{
+        Name="SizeMB"; Expression={[math]::Round($_.Length / 1MB, 2)}
+    }, @{
+        Name="File"; Expression={$_.Name}
+    }, @{
+        Name="Folder"; Expression={$_.DirectoryName}
+    }
+
+$Extensions = $Files |
+    Group-Object Extension |
+    ForEach-Object {
+        $Group = $_
+        $Size = ($Group.Group | Measure-Object Length -Sum).Sum
+
+        [PSCustomObject]@{
+            Extension = if ($Group.Name) {$Group.Name} else {"No extension"}
+            Files = $Group.Count
+            SizeGB = [math]::Round($Size / 1GB, 3)
+            SizeMB = [math]::Round($Size / 1MB, 2)
+        }
+    } |
+    Sort-Object SizeGB -Descending
+
+$TopFolders = $LargestFolders | Select-Object -First 20
+$TopFiles = $LargestFiles | Select-Object -First 100
+
+$Style = @"
+<style>
+body {
+    font-family: Segoe UI, Arial;
+    background: #f3f5f9;
+    color: #202938;
+    padding: 30px;
+}
+h1 { color: #172554; }
+h2 { margin-top: 35px; color: #1e40af; }
+.summary {
+    display: flex;
+    gap: 15px;
+    flex-wrap: wrap;
+}
+.card {
+    background: white;
+    padding: 20px;
+    border-radius: 12px;
+    min-width: 180px;
+    box-shadow: 0 2px 10px #0001;
+}
+.card strong { font-size: 25px; color: #2563eb; }
+table {
+    border-collapse: collapse;
+    width: 100%;
+    background: white;
+    margin-top: 15px;
+}
+th {
+    background: #1e3a8a;
+    color: white;
+    position: sticky;
+    top: 0;
+}
+td, th {
+    padding: 11px;
+    border: 1px solid #e5e7eb;
+    text-align: left;
+    font-size: 13px;
+}
+tr:nth-child(even) { background: #f8fafc; }
+tr:hover { background: #dbeafe; }
+input {
+    padding: 12px;
+    width: 300px;
+    max-width: 90%;
+    border: 1px solid #ccc;
+    border-radius: 7px;
+    margin: 10px 0;
+}
+.note { color: #64748b; }
+</style>
+"@
+
+$FolderHtml = $LargestFolders | ConvertTo-Html -Fragment
+$FileHtml = $TopFiles | ConvertTo-Html -Fragment
+$ExtensionHtml = $Extensions | ConvertTo-Html -Fragment
+
+$SizeGB = [math]::Round($TotalSize / 1GB, 3)
+$SizeMB = [math]::Round($TotalSize / 1MB, 2)
+
+$Html = @"
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Downloads Storage Analysis</title>
+$Style
+</head>
+<body>
+
+<h1>Windows Downloads - Storage Analysis</h1>
+<p class="note">Generated: $(Get-Date)</p>
+<p><b>Scanned location:</b> $Downloads</p>
+
+<div class="summary">
+<div class="card">Total Storage Used<br><strong>$SizeGB GB</strong></div>
+<div class="card">Total Files<br><strong>$($Files.Count)</strong></div>
+<div class="card">Total Folders<br><strong>$($Folders.Count)</strong></div>
+<div class="card">Largest File<br><strong>$($LargestFiles | Select-Object -First 1 | ForEach-Object {$_.SizeMB}) MB</strong></div>
+</div>
+
+<h2>Top 20 Largest Folders</h2>
+<input type="text" id="folderSearch" placeholder="Search folders..." onkeyup="filterTable('folderSearch','folderTable')">
+<div id="folderTable">
+$FolderHtml
+</div>
+
+<h2>Top 100 Largest Files</h2>
+<input type="text" id="fileSearch" placeholder="Search files..." onkeyup="filterTable('fileSearch','fileTable')">
+<div id="fileTable">
+$FileHtml
+</div>
+
+<h2>Storage by File Extension</h2>
+$ExtensionHtml
+
+<p class="note">Folder sizes are inclusive of nested subfolders. This report does not delete or modify any files.</p>
+
+<script>
+function filterTable(inputId, tableId) {
+    let input = document.getElementById(inputId).value.toLowerCase();
+    let rows = document.querySelectorAll('#' + tableId + ' table tr');
+
+    rows.forEach((row, index) => {
+        if (index === 0) return;
+        row.style.display = row.innerText.toLowerCase().includes(input) ? '' : 'none';
+    });
+}
+</script>
+
+</body>
+</html>
+"@
+
+Set-Content -LiteralPath $Report -Value $Html -Encoding UTF8
+
+Write-Host "`nREPORT GENERATED SUCCESSFULLY!" -ForegroundColor Green
+Write-Host $Report -ForegroundColor Yellow
+
+Start-Process $Report
